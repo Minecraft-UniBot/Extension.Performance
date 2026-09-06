@@ -7,17 +7,20 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 import time
 from typing import TYPE_CHECKING, Any
 
 from Scripts.Extensions.Builtin.Services.Servers import ServerService
+from Scripts.Extensions.Builtin.Services.Task import TaskService
 from Scripts.Logging import logger
 from Scripts.Utils import send_message_to_groups, strip_minecraft_color
 
 if TYPE_CHECKING:
     from Scripts.Extensions import Extension
+
+# 定时监控任务名（登记到机器人全局 TaskService，避免与其它任务重名）
+_MONITOR_TASK_NAME = 'performance-monitor'
 
 # 内置默认正则：兼容 spark tps 与 vanilla /tps 的常见输出格式
 #   spark：   "TPS from last 5s: 20.0  |  MSPT from last 5s: 49.72ms"
@@ -37,27 +40,32 @@ class PerformanceHelper:
 
     def __init__(self, extension: Extension) -> None:
         self._extension = extension
-        self._monitor_task: asyncio.Task | None = None
         # 各服务器告警冷却截止时间（time.monotonic 相对时间）：{server_name: cooldown_end}
         self._cooldowns: dict[str, float] = {}
 
     # ===== 对外能力 =====
 
     async def start(self) -> None:
-        """按配置启动定时监控任务。"""
-        if self._config.monitor_enabled and self._monitor_task is None:
-            self._monitor_task = asyncio.create_task(self._monitor_loop(), name='performance-monitor')
-            logger.success('Performance monitor started.')
+        """按配置启用定时监控任务。"""
+        config = self._config
+        if not config.monitor_enabled:
+            return
+        task_service = self._task_service()
+        if task_service is None:
+            logger.warning('TaskService unavailable, monitor not started.')
+            return
+        if not task_service.add(_MONITOR_TASK_NAME, self._monitor_round, config.monitor_interval):
+            logger.warning(f'Monitor task {_MONITOR_TASK_NAME} could not be registered.')
+            return
+        logger.success('Performance monitor started.')
 
     async def stop(self) -> None:
         """停止定时监控任务并清空告警冷却状态。"""
-        if self._monitor_task is not None:
-            self._monitor_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._monitor_task
-            self._monitor_task = None
-            self._cooldowns.clear()
-            logger.info('Performance monitor stopped.')
+        task_service = self._task_service()
+        if task_service is not None:
+            task_service.remove(_MONITOR_TASK_NAME)
+        self._cooldowns.clear()
+        logger.info('Performance monitor stopped.')
 
     async def fetch(self, server_flag: str | int | None = None) -> dict[str, Any]:
         """
@@ -110,6 +118,10 @@ class PerformanceHelper:
     def _server_service(self):
         """获取内置服务器服务，缺失返回 None。"""
         return self._extension.api.get(ServerService)
+
+    def _task_service(self):
+        """获取内置定时任务服务，缺失返回 None。"""
+        return self._extension.api.get(TaskService)
 
     def _placeholder_service(self):
         """按注册名获取占位符 API 服务（未安装时返回 None）。"""
@@ -242,18 +254,6 @@ class PerformanceHelper:
                 return []
             self._cooldowns[server_name] = now + config.monitor_interval
         return violations
-
-    # ===== 定时监控调度 =====
-
-    async def _monitor_loop(self) -> None:
-        """周期执行监控采集，随扩展生命周期运行。"""
-        config = self._config
-        while True:
-            await asyncio.sleep(config.monitor_interval)
-            try:
-                await self.monitor_round()
-            except Exception as error:
-                logger.warning(f'Performance monitor round failed: {error}')
 
     # ===== 告警发送 =====
 

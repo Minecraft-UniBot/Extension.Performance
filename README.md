@@ -62,14 +62,18 @@ enabled = true
 
 指令前缀继承机器人全局 `command_start`（默认 `#`），以下以 `#` 为例。
 
-### `#perf [服务器]`（别名 `#tps` / `#mspt`）
+### `#perf [服务器]` / `#tps [服务器]` / `#mspt [服务器]`
 
-查询服务器 TPS / MSPT。`[服务器]` 缺省自动选择第一台在线服务器。
+查询服务器性能指标。`[服务器]` 缺省自动选择第一台在线服务器。
+
+- `#perf`：同时查询 TPS 与 MSPT
+- `#tps`：仅查询 TPS
+- `#mspt`：仅查询 MSPT
 
 ```
 #perf
-#perf 1
-#perf 生存服
+#tps 1
+#mspt 生存服
 ```
 
 > 权限默认仅管理员；配置 `query_public = true` 后可对所有用户开放。
@@ -137,7 +141,7 @@ enabled = true
 | `max_mspt` | `0.0` | MSPT 高于该值告警，置 `0` 停用 |
 
 > 告警需同时满足：`monitor_enabled` 与至少一条阈值规则；发送目标为机器人的消息群。
-> 启用定时监控后会注册后台任务，随扩展生命周期启停。
+> 定时监控复用机器人的内置 **TaskService**（定时任务服务）注册周期任务，随扩展生命周期启停。
 
 ---
 
@@ -151,7 +155,7 @@ Extensions/Performance/
 ├── Extension.toml      # 清单：声明类型、依赖与版本
 ├── __init__.py         # 入口：创建扩展实例，生命周期内启停内部监控
 ├── Config.py           # 配置模型（PerformanceConfig）
-├── Commands.py         # 指令定义（/perf）
+├── Commands.py         # 指令定义（/perf、/tps、/mspt）
 └── Services.py         # 内部采集辅助（PerformanceHelper，不注册能力）
 ```
 

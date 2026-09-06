@@ -1,9 +1,10 @@
 """Performance 性能查询指令。
 
-提供 TPS/MSPT 手动查询指令，可按配置开放给普通用户或仅限管理员。
+提供 TPS / MSPT 查询指令，可按配置开放给普通用户或仅限管理员。
 数据采集逻辑由扩展自身的 `helper`（PerformanceHelper）承担，本模块只负责指令解析与结果渲染。
 """
 
+from abc import ABC
 from typing import override
 
 from nonebot_plugin_alconna import Match
@@ -14,18 +15,12 @@ from Scripts.Utils import get_permission
 
 from . import extension
 
-# 指令别名：兼容习惯性输入
-COMMAND_ALIASES = ('tps', 'mspt')
 
+class _PerformanceQuery(Command, ABC):
+    """TPS / MSPT 查询的共享基类：提供权限校验与结果渲染，子类声明取值字段。"""
 
-@extension.register_command
-class PerformanceCommand(Command):
-    """查询服务器 TPS / MSPT 性能指标。"""
-
-    name = 'perf'
-    aliases = COMMAND_ALIASES
-    description = '查询服务器 TPS / MSPT 性能指标。'
-    usage = '/perf [服务器] 或 /tps [服务器]'
+    # 子类声明要展示的字段元数据：(result 键, 显示标签, 是否带单位 ms)
+    display_fields: tuple[tuple[str, str, bool], ...] = ()
 
     @override
     def declare(self) -> None:
@@ -55,9 +50,40 @@ class PerformanceCommand(Command):
             return f"[{result['server']}] 未能解析到 TPS/MSPT，请检查数据源指令与正则配置。"
         server_name = result['server'] or '未知服务器'
         parts = [f'服务器：{server_name}']
-        if result['tps'] is not None:
-            parts.append(f'TPS：{result["tps"]:.1f}')
-        if result['mspt'] is not None:
-            parts.append(f'MSPT：{result["mspt"]:.1f}ms')
+        for key, label, is_ms in self.display_fields:
+            value = result[key]
+            if value is None:
+                continue
+            parts.append(f'{label}：{value:.1f}' + ('ms' if is_ms else ''))
         parts.append(f"来源：{result['source']}")
         return '\n'.join(parts)
+
+
+@extension.register_command
+class PerfQuery(_PerformanceQuery):
+    """查询服务器 TPS 与 MSPT 性能指标。"""
+
+    name = 'perf'
+    description = '查询服务器 TPS / MSPT 性能指标。'
+    usage = '/perf [服务器]'
+    display_fields = (('tps', 'TPS', False), ('mspt', 'MSPT', True))
+
+
+@extension.register_command
+class TpsQuery(_PerformanceQuery):
+    """查询服务器 TPS 性能指标。"""
+
+    name = 'tps'
+    description = '查询服务器 TPS 性能指标。'
+    usage = '/tps [服务器]'
+    display_fields = (('tps', 'TPS', False),)
+
+
+@extension.register_command
+class MsptQuery(_PerformanceQuery):
+    """查询服务器 MSPT 性能指标。"""
+
+    name = 'mspt'
+    description = '查询服务器 MSPT 性能指标。'
+    usage = '/mspt [服务器]'
+    display_fields = (('mspt', 'MSPT', True),)

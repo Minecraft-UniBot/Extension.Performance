@@ -8,7 +8,7 @@ Performance 扩展包入口。
     Extension.toml    清单：声明类型与依赖（Servers）
     __init__.py       入口：定义扩展实例（子类化 Extension，生命周期启停监控）
     Config.py         配置模型（pydantic BaseModel）
-    Commands.py       指令定义（/perf 查询）
+    Commands.py       指令定义（/perf、/tps、/mspt 查询）
     Services.py       内部采集辅助（非注册能力，供扩展本体复用）
 """
 
