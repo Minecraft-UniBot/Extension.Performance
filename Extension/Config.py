@@ -2,18 +2,24 @@
 
 from pydantic import BaseModel, Field
 
+# 内置默认正则（字符串常量，直接作为 CommandSource 字段默认值，供 JSON schema / WebUI 展示）：
+#   spark：   "TPS from last 5s: 20.0  |  MSPT from last 5s: 49.72ms"
+#   vanilla： "TPS: 20.0" 或 "TPS from last 1m: 20.0" 等
+DEFAULT_TPS_PATTERN = r'TPS(?: from last \d+(?:\.\d+)?[smhd])?\s*[:：]\s*(\d+(?:\.\d+)?)'
+DEFAULT_MSPT_PATTERN = r'MSPT(?: from last \d+(?:\.\d+)?[smhd])?\s*[:：]\s*(\d+(?:\.\d+)?)'
+
 
 class CommandSource(BaseModel):
     """指令 + 正则数据源。"""
 
     # 执行的 RCON 指令（不含斜杠）。留空则停用该数据源。
-    command: str = Field(default='spark tps', description='RCON 指令（无需斜杠），留空停用该数据源')
+    command: str = Field(default='spark tps', title='指令', description='RCON 指令（无需斜杠），留空停用该数据源')
 
-    # 从指令输出中解析 TPS 的正则，须含一个捕获组；留空使用内置默认（兼容 spark tps / vanilla tps）。
-    tps_pattern: str = Field(default='', description='解析 TPS 的正则（含一个捕获组），留空使用内置默认')
+    # 从指令输出中解析 TPS 的正则，须含一个捕获组；默认内置（兼容 spark tps / vanilla tps）。
+    tps_pattern: str = Field(default=DEFAULT_TPS_PATTERN, title='TPS 正则', description='解析 TPS 的正则（含一个捕获组），默认内置兼容 spark / vanilla')
 
-    # 从指令输出中解析 MSPT 的正则；留空表示该源不解析 MSPT。
-    mspt_pattern: str = Field(default='', description='解析 MSPT 的正则（含一个捕获组），留空不解析 MSPT')
+    # 从指令输出中解析 MSPT 的正则；默认内置（兼容 spark），留空表示该源不解析 MSPT。
+    mspt_pattern: str = Field(default=DEFAULT_MSPT_PATTERN, title='MSPT 正则', description='解析 MSPT 的正则（含一个捕获组），默认内置兼容 spark，留空不解析 MSPT')
 
     @property
     def enabled(self) -> bool:
@@ -25,13 +31,13 @@ class Threshold(BaseModel):
     """阈值告警规则。"""
 
     # 目标服务器：留空对全部已连接服务器生效，否则为编号/名称
-    server: str = Field(default='', description='目标服务器编号/名称，留空监控全部已连接服务器')
+    server: str = Field(default='', title='服务器', description='目标服务器编号/名称，留空监控全部已连接服务器')
 
     # TPS 过低告警阈值：低于该值触发，置 0 停用
-    min_tps: float = Field(default=15.0, ge=0, description='TPS 低于该值触发告警，置 0 停用')
+    min_tps: float = Field(default=15.0, ge=0, title='最低 TPS', description='TPS 低于该值触发告警，置 0 停用')
 
     # MSPT 过高告警阈值：高于该值触发，置 0 停用
-    max_mspt: float = Field(default=0.0, ge=0, description='MSPT 高于该值触发告警，置 0 停用')
+    max_mspt: float = Field(default=0.0, ge=0, title='最高 MSPT', description='MSPT 高于该值触发告警，置 0 停用')
 
 
 class PerformanceConfig(BaseModel):
@@ -51,7 +57,7 @@ class PerformanceConfig(BaseModel):
 
     # 指令数据源列表，按顺序依次尝试，首个成功解析到 TPS 即返回。
     command_sources: list[CommandSource] = Field(
-        default_factory=lambda: [CommandSource(command='spark tps'), CommandSource(command='tps')],
+        default=[CommandSource(command='spark tps'), CommandSource(command='tps')],
         description='指令数据源列表，按顺序尝试；已内置 spark tps 与 vanilla tps 默认正则',
     )
 
@@ -82,4 +88,4 @@ class PerformanceConfig(BaseModel):
     alert_repeat: bool = Field(default=False, description='是否对持续越界重复告警')
 
     # 阈值规则列表
-    thresholds: list[Threshold] = Field(default_factory=lambda: [Threshold()], description='阈值告警规则列表')
+    thresholds: list[Threshold] = Field(default=[Threshold()], description='阈值告警规则列表')

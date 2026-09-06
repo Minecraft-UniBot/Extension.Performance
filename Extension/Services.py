@@ -16,23 +16,21 @@ from Scripts.Extensions.Builtin.Services.Task import TaskService
 from Scripts.Logging import logger
 from Scripts.Utils import send_message_to_groups, strip_minecraft_color
 
+from .Config import DEFAULT_MSPT_PATTERN, DEFAULT_TPS_PATTERN
+
 if TYPE_CHECKING:
+    from nonebot.adapters.minecraft import Bot
+
     from Scripts.Extensions import Extension
+
+    from .Config import PerformanceConfig, Threshold
 
 # 定时监控任务名（登记到机器人全局 TaskService，避免与其它任务重名）
 _MONITOR_TASK_NAME = 'performance-monitor'
 
-# 内置默认正则：兼容 spark tps 与 vanilla /tps 的常见输出格式
-#   spark：   "TPS from last 5s: 20.0  |  MSPT from last 5s: 49.72ms"
-#   vanilla： "TPS: 20.0" 或 "TPS from last 1m: 20.0" 等
-_DEFAULT_TPS_PATTERN = re.compile(
-    r'TPS(?: from last \d+(?:\.\d+)?[smhd])?\s*[:：]\s*(\d+(?:\.\d+)?)',
-    re.IGNORECASE,
-)
-_DEFAULT_MSPT_PATTERN = re.compile(
-    r'MSPT(?: from last \d+(?:\.\d+)?[smhd])?\s*[:：]\s*(\d+(?:\.\d+)?)',
-    re.IGNORECASE,
-)
+# 内置默认正则：直接复用 Config 声明的默认字符串常量（单一来源），此处编译一次供回退使用
+_DEFAULT_TPS_PATTERN = re.compile(DEFAULT_TPS_PATTERN, re.IGNORECASE)
+_DEFAULT_MSPT_PATTERN = re.compile(DEFAULT_MSPT_PATTERN, re.IGNORECASE)
 
 
 class PerformanceHelper:
@@ -54,7 +52,7 @@ class PerformanceHelper:
         if task_service is None:
             logger.warning('TaskService unavailable, monitor not started.')
             return
-        if not task_service.add(_MONITOR_TASK_NAME, self._monitor_round, config.monitor_interval):
+        if not task_service.add(_MONITOR_TASK_NAME, self.monitor_round, config.monitor_interval):
             logger.warning(f'Monitor task {_MONITOR_TASK_NAME} could not be registered.')
             return
         logger.success('Performance monitor started.')
@@ -111,23 +109,23 @@ class PerformanceHelper:
     # ===== 采集实现 =====
 
     @property
-    def _config(self):
+    def _config(self) -> PerformanceConfig:
         """读取当前扩展配置。"""
         return self._extension.config.value
 
-    def _server_service(self):
+    def _server_service(self) -> ServerService | None:
         """获取内置服务器服务，缺失返回 None。"""
         return self._extension.api.get(ServerService)
 
-    def _task_service(self):
+    def _task_service(self) -> TaskService | None:
         """获取内置定时任务服务，缺失返回 None。"""
         return self._extension.api.get(TaskService)
 
-    def _placeholder_service(self):
+    def _placeholder_service(self) -> Any | None:
         """按注册名获取占位符 API 服务（未安装时返回 None）。"""
         return self._extension.api.get('placeholder')
 
-    async def _fetch_from_command(self, server) -> dict[str, Any]:
+    async def _fetch_from_command(self, server: Bot) -> dict[str, Any]:
         """通过 RCON 指令 + 正则采集，多个指令源依次尝试。"""
         config = self._config
         for source in config.command_sources:
@@ -153,7 +151,7 @@ class PerformanceHelper:
                 return {'tps': tps, 'mspt': mspt, 'source': f'command:{command}'}
         return {'tps': None, 'mspt': None, 'source': 'none'}
 
-    async def _fetch_from_placeholder(self, server) -> dict[str, Any]:
+    async def _fetch_from_placeholder(self, server: Bot) -> dict[str, Any]:
         """通过占位符 API 服务采集 TPS / MSPT。"""
         config = self._config
         placeholder_service = self._placeholder_service()
@@ -173,7 +171,7 @@ class PerformanceHelper:
         return {'tps': tps, 'mspt': mspt}
 
     @staticmethod
-    async def _safe_placeholder_get(get_value, placeholder: str, server_name: str):
+    async def _safe_placeholder_get(get_value, placeholder: str, server_name: str) -> str | None:
         """安全调用占位符服务 get()，失败返回 None。"""
         try:
             return await get_value(placeholder, server_flag=server_name)
@@ -216,14 +214,14 @@ class PerformanceHelper:
         return number if number >= 0 else None
 
     @staticmethod
-    def _resolve_server(server_service, server_flag: str | int | None):
+    def _resolve_server(server_service: ServerService, server_flag: str | int | None) -> Bot | None:
         """解析目标服务器，未指定时取第一台在线服务器。"""
         if server_flag:
             return server_service.get_server(server_flag)
         return next(iter(server_service.servers.values()), None)
 
     @staticmethod
-    def _collect_target_servers(server_service, server_flag: str) -> list:
+    def _collect_target_servers(server_service: ServerService, server_flag: str) -> list[Bot]:
         """返回监控目标服务器列表：未指定时取全部已连接服务器。"""
         if server_flag:
             server = server_service.get_server(server_flag)
@@ -231,11 +229,11 @@ class PerformanceHelper:
         return list(server_service.servers.values())
 
     @staticmethod
-    def _rule_matches(rule, server_name: str) -> bool:
+    def _rule_matches(rule: Threshold, server_name: str) -> bool:
         """判断阈值规则是否作用于指定服务器（空 server 作用于全部）。"""
         return not rule.server or rule.server == server_name
 
-    def _build_violations(self, server_name: str, result: dict, rules: list) -> list[str]:
+    def _build_violations(self, server_name: str, result: dict[str, Any], rules: list[Threshold]) -> list[str]:
         """依据规则构造越界告警消息，应用重复告警与冷却期。"""
         config = self._config
         tps, mspt = result['tps'], result['mspt']

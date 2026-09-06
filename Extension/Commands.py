@@ -28,14 +28,14 @@ class _PerformanceQuery(Command, ABC):
         self.register_option('server', str, default=None, description='目标服务器编号/名称，缺省自动选择')
 
     @override
-    async def handler(self, session: Uninfo, server: Match[str]):
+    async def handler(self, session: Uninfo, server: Match[str]) -> str | None:
         if not self._can_query(session):
             return '你没有权限执行此指令。'
         server_flag = server.result if server.available else None
         result = await extension.helper.fetch(server_flag)
         return self._render_text(result)
 
-    def _can_query(self, session) -> bool:
+    def _can_query(self, session: Uninfo) -> bool:
         """判断是否允许本次查询（按配置开放给普通用户或仅管理员）。"""
         config = extension.config.value
         if config.query_public:
