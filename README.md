@@ -1,37 +1,39 @@
 <p align="center">
-  <img src=".github/images/icon.svg" alt="Example" width="140" />
+  <img src=".github/images/icon.svg" alt="Performance" width="140" />
 </p>
 
-<h1 align="center">示例扩展 · Example</h1>
+<h1 align="center">性能监控 · Performance</h1>
 
 <p align="center">
-  一个演示 <strong>UniBot 扩展开发</strong> 与 <strong>市场发布流程</strong> 的模板扩展
+  查询 Minecraft 服务器 <strong>TPS / MSPT</strong>，支持多数据源、定时监控与阈值告警
 </p>
 
 <p align="center">
-  <code>🧩 指令</code>
-  <code>🔌 服务</code>
-  <code>⚙️ 配置</code>
+  <code>📈 TPS</code>
+  <code>⏱ MSPT</code>
+  <code>🔌 占位符</code>
+  <code>⚙️ 阈值告警</code>
   <code>📦 市场就绪</code>
 </p>
 
 ---
 
-集**指令（command）、服务（api）与配置**三类能力于一身，可直接作为新扩展的起点。
+集**指令（command）与配置**于一身，为 UniBot 提供服务器性能监测能力。
 
-- **类型**：`api` + `command`
-- **依赖**：无（仅使用框架核心能力）
+- **类型**：`command`
+- **依赖**：内置 `Servers` 扩展（执行 RCON 指令）；占位符数据源可选依赖市场 `Placeholder` 扩展
 - **版本对应**：兼容 UniBot `*`
-
-> 💡 本模板按标准多文件扩展布局组织，字段与清单均符合插件市场校验要求，可直接打包上传。
 
 ## ✨ 功能一览
 
 | 能力 | 说明 |
 |------|------|
-| 🎉 **问候** | 按配置模板生成问候语 |
-| 🔁 **重复文本** | 将文本重复输出多行，受配置上限约束 |
-| 🔌 **示例服务** | 提供 `ExampleService`，供其它扩展复用 |
+| 📈 **TPS 查询** | 查询服务器当前 TPS |
+| ⏱ **MSPT 查询** | 查询服务器当前 MSPT |
+| 🧪 **多数据源** | 支持「RCON 指令 + 正则」与「占位符服务」两种取数方式 |
+| 🔁 **定时监控** | 按固定间隔轮询服务器性能 |
+| 🔔 **阈值告警** | TPS 过低 / MSPT 过高时向机器人的消息群发送告警 |
+| 🔐 **权限可配** | 默认仅管理员可查，可放开给普通用户 |
 
 ---
 
@@ -41,93 +43,127 @@
 
 **通过 UniBot 插件市场安装**：
 
-1. 在 WebUI 的「插件市场」中搜索 `Example`。
+1. 在 WebUI 的「插件市场」中搜索 `Performance`。
 2. 选择最新版本并点击安装，之后在「扩展管理」中启用。
 
 **手动安装**：
 
-将扩展目录放入 `Extensions/Example/`，然后在 `Config/Extensions.toml` 中启用：
+将扩展目录放入 `Extensions/Performance/`，然后在 `Config/Extensions.toml` 中启用：
 
 ```toml
-[Example]
+[Performance]
 enabled = true
 ```
 
-> 卸载或禁用后，对应指令与 `ExampleService` 能力将不可用。
+> 本扩展依赖内置 `Servers` 扩展（默认启用），执行 RCON 指令取数。若启用占位符数据源，
+> 还需另外安装市场扩展 `Placeholder`（占位符 API）。
 
 ## 🎮 指令
 
 指令前缀继承机器人全局 `command_start`（默认 `#`），以下以 `#` 为例。
 
-### `#example greet [目标]`
+### `#perf [服务器]`（别名 `#tps` / `#mspt`）
 
-按配置模板向目标问好，缺省目标时使用当前使用者。
-
-```
-#example greet
-#example greet 小明
-```
-
-### `#example repeat <文本> [次数]`
-
-将文本重复输出多行。`<文本>` 支持多词（贪婪合并），`[次数]` 缺省用配置默认值且受上限约束。
+查询服务器 TPS / MSPT。`[服务器]` 缺省自动选择第一台在线服务器。
 
 ```
-#example repeat 打卡，坚持！
-#example repeat hello world 2
+#perf
+#perf 1
+#perf 生存服
 ```
 
-> 缺省参数时命令会返回友好提示（如「请提供要重复的文本。」），不会静默无响应。
+> 权限默认仅管理员；配置 `query_public = true` 后可对所有用户开放。
 
 ## ⚙️ 配置
 
-配置可由 WebUI 扩展管理面板修改，或直接编辑 `Config/Extensions/Example.toml`：
+配置可由 WebUI 扩展管理面板修改，或直接编辑 `Config/Extensions/Performance.toml`。
+
+### 查询权限
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `greeting` | `你好，{name}！` | 问候语模板，`{name}` 会被使用者名替换 |
-| `max_repeat` | `3` | 单次重复次数的上限（1–10） |
-| `debug` | `false` | 是否输出调试日志 |
+| `query_public` | `false` | 是否允许普通用户查询（默认仅管理员） |
+
+### 指令 + 正则数据源
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `command_sources` | `spark tps`、`tps` | RCON 指令列表，按顺序尝试；每项可配 `command` / `tps_pattern` / `mspt_pattern` |
+| `command_timeout` | `5.0` | 单次 RCON 指令执行超时（秒） |
+
+每个数据源元素包含：
+
+| 字段 | 说明 |
+|------|------|
+| `command` | 执行的 RCON 指令（不含斜杠），留空停用该数据源 |
+| `tps_pattern` | 解析 TPS 的正则（含一个捕获组），留空用内置默认 |
+| `mspt_pattern` | 解析 MSPT 的正则（含一个捕获组），留空不解析 MSPT |
+
+内置默认正则兼容 `spark tps`（`TPS from last 5s: 20.0 | MSPT from last 5s: 49.72ms`）
+与 vanilla `/tps`（`TPS: 20.0` / `MSPT: 50.0ms`）。服务端未装 spark 时，默认还会尝试 `tps`。
+
+> 若你的服务端输出不同（如中文化或自定义插件），可在 `tps_pattern` / `mspt_pattern`
+> 填写自定义正则覆盖默认解析，例如 `TPS 值[:：]\s*(\d+\.?\d*)`。
+
+### 占位符数据源
+
+需另装市场扩展 `Placeholder`（占位符 API），本扩展经其 `PlaceholderService.get()` 取值：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `placeholder_source_enabled` | `false` | 是否启用占位符数据源 |
+| `placeholder_tps` | `%server_tps%` | 取 TPS 的占位符 |
+| `placeholder_mspt` | `%server_mspt%` | 取 MSPT 的占位符 |
+
+> 占位符仅在指令数据源取不到 TPS 时作为回退尝试。
+
+### 定时监控与告警
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `monitor_enabled` | `false` | 是否启用定时监控 |
+| `monitor_server` | `''` | 监控目标服务器（编号/名称），留空监控全部 |
+| `monitor_interval` | `60.0` | 监控采集间隔（秒，≥5） |
+| `alert_repeat` | `false` | 持续越界是否重复告警；关闭时恢复后再越界才重新告警 |
+
+> 告警直接发送到机器人的**全局消息群**（`Config.toml` 的 `message_groups`），无需在本扩展中额外配置发送目标。
+
+每个阈值规则元素包含：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `server` | `''` | 作用的目标服务器，留空对全部生效 |
+| `min_tps` | `15.0` | TPS 低于该值告警，置 `0` 停用 |
+| `max_mspt` | `0.0` | MSPT 高于该值告警，置 `0` 停用 |
+
+> 告警需同时满足：`monitor_enabled` 与至少一条阈值规则；发送目标为机器人的消息群。
+> 启用定时监控后会注册后台任务，随扩展生命周期启停。
 
 ---
 
-## 🧩 服务能力
-
-其它扩展可通过 `extension.api.get(ExampleService)` 复用示例能力（服务注册名 `example`）：
-
-```python
-from Extensions.Example.Services import ExampleService
-
-service = extension.api.get(ExampleService)
-if service is not None:
-    message = service.compose_greeting('小明')
-```
-
-### 公开方法
-
-| 方法 | 签名 | 说明 |
-|------|------|------|
-| `compose_greeting` | `compose_greeting(name: str) -> str` | 按配置模板生成问候语 |
-| `repeat_text` | `repeat_text(text: str, count: int \| None = None) -> list[str]` | 将文本重复多行，受 `max_repeat` 约束 |
+> 采集、监控与告警逻辑收敛于扩展自身内部的 `helper`（见 `Services.py`），随扩展实例的
+> 生命周期启停，**不对外注册任何服务能力**，仅供扩展本体内部使用。
 
 ## 📁 目录结构
 
 ```
-Extensions/Example/
+Extensions/Performance/
 ├── Extension.toml      # 清单：声明类型、依赖与版本
-├── __init__.py         # 入口：创建扩展实例并登记能力
-├── Config.py           # 配置模型（ExampleConfig）
-├── Commands.py         # 指令定义（greet / repeat）
-└── Services.py         # 服务实现（ExampleService）
+├── __init__.py         # 入口：创建扩展实例，生命周期内启停内部监控
+├── Config.py           # 配置模型（PerformanceConfig）
+├── Commands.py         # 指令定义（/perf）
+└── Services.py         # 内部采集辅助（PerformanceHelper，不注册能力）
 ```
 
 ## 🛠 故障排查
 
 | 现象 | 可能原因 | 处理 |
 |------|---------|------|
-| 指令提示「示例服务不可用」 | 扩展未被正确加载或服务登记失败 | 确认 `Config/Extensions.toml` 已启用，查看日志 |
-| 指令无响应 | 缺参时未兜底返回提示 | 检查 handler 中是否正确判断 `Match.available` 与 `result` |
-| 配置修改不生效 | 修改后未重启 | 修改启停/配置后需重启机器人 |
+| 查询提示「无法获取性能数据」 | 服务器离线或未装 spark / 无 /tps | 确认服务端已连接且支持 `spark tps` 或 `tps` |
+| 解析不到 TPS/MSPT | 服务端输出格式与默认正则不符 | 在数据源配置中填写自定义 `tps_pattern` / `mspt_pattern` |
+| 占位符数据源不生效 | 未安装 `Placeholder` 扩展，或未开启开关 | 安装占位符 API 扩展并设 `placeholder_source_enabled = true` |
+| 告警不发送 | 未满足告警前置条件，或未配置消息群 | 确认 `monitor_enabled` 与阈值规则已配置，且 `Config.toml` 的 `message_groups` 非空 |
+| 指令无权限提示 | 默认仅管理员可查 | 设 `query_public = true` 或让管理员执行 |
 
 ## 📤 发布到 UniBot 插件市场
 
@@ -138,10 +174,3 @@ Extensions/Example/
 3. **登记**：在扩展注册表（JSON 索引文件）中登记条目，包含元信息与 Release 资产地址（含 SHA-256 校验和），用户即可在 WebUI「插件市场」搜索并安装。
 
 > 安装时系统会校验 zip 根目录与清单中的 `id` 一致，并拒绝绝对路径、`../` 路径与符号链接，因此打包务必以扩展目录为根。
-
-### 开发新扩展时
-
-- 复制本目录，重命名 `id` 与各类名（`Example` → 你的扩展名），替换业务逻辑。
-- `id` 仅允许 `A-Za-z0-9_`；指令/参数名小写字母/数字/下划线。
-- 若使用第三方库，在 `Extension.toml` 的 `[dependencies].python` 声明，框架会自动同步依赖。
-- 若依赖其它扩展的能力，在 `[dependencies].extensions` 声明其 `id`。

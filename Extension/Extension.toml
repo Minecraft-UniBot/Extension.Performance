@@ -2,16 +2,16 @@
 schema_version = 1
 
 [extension]
-id = "Example"
-name = "示例扩展"
+id = "Performance"
+name = "性能监控"
 version = "1.0.0"
 author = "UniBot"
-description = "一个演示 UniBot 扩展开发流程的示例扩展：包含指令、服务与配置。"
-types = ["api", "command"]
+description = "查询 Minecraft 服务器 TPS/MSPT，支持指令、占位符多种数据源与定时阈值告警。"
+types = ["command"]
 
 [compatibility]
 unibot = "*"
 
 [dependencies]
-extensions = []
+extensions = ["Servers"]
 python = []
