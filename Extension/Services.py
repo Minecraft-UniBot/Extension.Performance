@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 # 定时监控任务名（登记到机器人全局 TaskService，避免与其它任务重名）
 _MONITOR_TASK_NAME = 'performance-monitor'
 
+# 目标服务器参数取值：显式指定全部服务器
+ALL_SERVERS_FLAG = '*'
+
 # 内置默认正则：直接复用 Config 声明的默认字符串常量（单一来源），此处编译一次供回退使用
 _DEFAULT_TPS_PATTERN = re.compile(DEFAULT_TPS_PATTERN, re.IGNORECASE)
 _DEFAULT_MSPT_PATTERN = re.compile(DEFAULT_MSPT_PATTERN, re.IGNORECASE)
@@ -65,28 +68,24 @@ class PerformanceHelper:
         self._cooldowns.clear()
         logger.info('Performance monitor stopped.')
 
-    async def fetch(self, server_flag: str | int | None = None) -> dict[str, Any]:
+    async def fetch_many(self, server_flag: str | int | None = None) -> list[dict[str, Any]]:
         """
-        获取指定服务器的 TPS / MSPT。
+        查询一台或全部已连接服务器的 TPS / MSPT。
 
-        依次尝试指令与占位符数据源，首个成功取得 TPS 即返回。
-        返回 `{'server': 名称, 'tps': float|None, 'mspt': float|None, 'source': 来源}`。
+        传编号 / 名称时仅查询该服务器（不存在或未连接时返回空列表）；
+        缺省或传 `*` 时并发查询全部已连接服务器，按 `/server` 的服务器列表顺序返回。
+
+        每项为 `{'server': 名称, 'tps': float|None, 'mspt': float|None, 'source': 来源}`。
         """
         server_service = self._server_service()
         if server_service is None or not server_service.check_online():
-            return self._empty_result()
-        server = self._resolve_server(server_service, server_flag)
-        if server is None:
-            return self._empty_result()
-        server_name = server.self_id
-
-        result = await self._fetch_from_command(server)
-        if result['tps'] is None and self._config.placeholder_source_enabled:
-            placeholder_result = await self._fetch_from_placeholder(server)
-            placeholder_result['source'] = 'placeholder' if placeholder_result['tps'] is not None else 'none'
-            result = placeholder_result
-        result['server'] = server_name
-        return result
+            return []
+        targets = self._resolve_targets(server_service, server_flag)
+        if not targets:
+            return []
+        # 并发采集避免多服务器串行等待；gather 保持输入顺序，结果即与服务器列表顺序一致
+        collected = await asyncio.gather(*(self._fetch_one(server) for _, server in targets))
+        return [{**result, 'server': name} for (name, _), result in zip(targets, collected)]
 
     async def monitor_round(self) -> None:
         """执行一轮监控采集，并按阈值规则向消息群发送告警。"""
@@ -96,12 +95,11 @@ class PerformanceHelper:
         server_service = self._server_service()
         if server_service is None or not server_service.check_online():
             return
-        targets = self._collect_target_servers(server_service, config.monitor_server)
-        for server in targets:
-            server_name = server.self_id
-            result = await self.fetch(server_name)
+        results = await self.fetch_many(config.monitor_server or None)
+        for result in results:
             if result['tps'] is None and result['mspt'] is None:
                 continue
+            server_name = result['server']
             rules = [rule for rule in config.thresholds if self._rule_matches(rule, server_name)]
             for message in self._build_violations(server_name, result, rules):
                 await self._send_alert(message)
@@ -124,6 +122,15 @@ class PerformanceHelper:
     def _placeholder_service(self) -> Any | None:
         """按注册名获取占位符 API 服务（未安装时返回 None）。"""
         return self._extension.api.get('placeholder')
+
+    async def _fetch_one(self, server: Bot) -> dict[str, Any]:
+        """采集单台服务器的性能数据，依次尝试指令与占位符数据源。"""
+        result = await self._fetch_from_command(server)
+        if result['tps'] is None and self._config.placeholder_source_enabled:
+            placeholder_result = await self._fetch_from_placeholder(server)
+            placeholder_result['source'] = 'placeholder' if placeholder_result['tps'] is not None else 'none'
+            result = placeholder_result
+        return result
 
     async def _fetch_from_command(self, server: Bot) -> dict[str, Any]:
         """通过 RCON 指令 + 正则采集，多个指令源依次尝试。"""
@@ -214,19 +221,23 @@ class PerformanceHelper:
         return number if number >= 0 else None
 
     @staticmethod
-    def _resolve_server(server_service: ServerService, server_flag: str | int | None) -> Bot | None:
-        """解析目标服务器，未指定时取第一台在线服务器。"""
-        if server_flag:
-            return server_service.get_server(server_flag)
-        return next(iter(server_service.servers.values()), None)
+    def _resolve_targets(server_service: ServerService, server_flag: str | int | None) -> list[tuple[str, Bot]]:
+        """
+        解析查询目标为 `(名称, 机器人)` 列表。
 
-    @staticmethod
-    def _collect_target_servers(server_service: ServerService, server_flag: str) -> list[Bot]:
-        """返回监控目标服务器列表：未指定时取全部已连接服务器。"""
-        if server_flag:
-            server = server_service.get_server(server_flag)
-            return [server] if server is not None else []
-        return list(server_service.servers.values())
+        传编号 / 名称时仅返回匹配的服务器（编号与 `/server` 展示的列表顺序一致，
+        从 1 开始），缺省或传 `*` 时返回全部已连接服务器。
+        """
+        items = list(server_service.servers.items())
+        if server_flag and str(server_flag).strip() != ALL_SERVERS_FLAG:
+            bot = server_service.get_server(server_flag)
+            if bot is None:
+                return []
+            for name, candidate in items:
+                if candidate is bot:
+                    return [(name, bot)]
+            return [(bot.self_id, bot)]
+        return items
 
     @staticmethod
     def _rule_matches(rule: Threshold, server_name: str) -> bool:
@@ -262,8 +273,3 @@ class PerformanceHelper:
             logger.info('Sent performance alert to message groups.')
         else:
             logger.warning('Failed to send performance alert to message groups.')
-
-    @staticmethod
-    def _empty_result() -> dict[str, Any]:
-        """构造无数据结果。"""
-        return {'server': '', 'tps': None, 'mspt': None, 'source': 'none'}
