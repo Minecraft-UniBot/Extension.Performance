@@ -10,7 +10,7 @@ description = "查询 Minecraft 服务器 TPS/MSPT，支持指令、占位符多
 types = ["command"]
 
 [compatibility]
-unibot = "*"
+unibot = ">= 1.0.6"
 
 [dependencies]
 extensions = ["Servers", "Task"]
